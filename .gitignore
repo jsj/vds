@@ -57,6 +57,7 @@
 !/src/**/*.cc
 !/src/**/*.cpp
 !/src/**/*.cxx
+!/src/**/*.entitlements
 !/src/**/*.h
 !/src/**/*.hh
 !/src/**/*.hpp

@@ -27,6 +27,7 @@ support physical transports other than Bluetooth.
 
 - [Linux](README-LINUX.md)
 - [Windows](README-WINDOWS.md)
+- [macOS (experimental)](README-MACOS.md)
 
 ## Common Controller Configuration
 

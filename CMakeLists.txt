@@ -16,6 +16,10 @@ endif()
 if(WIN32)
   find_package(Opus CONFIG REQUIRED)
   set(VDS_OPUS_TARGET Opus::opus)
+elseif(APPLE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
+  set(VDS_OPUS_TARGET PkgConfig::OPUS)
 else()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(BLUEZ REQUIRED IMPORTED_TARGET bluez)
@@ -23,6 +27,21 @@ else()
   pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
   pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)
   set(VDS_OPUS_TARGET PkgConfig::OPUS)
+endif()
+
+if(APPLE)
+  add_executable(vds-macos-hid-probe src/platform/macos/vds_hid_probe.cc)
+  target_include_directories(vds-macos-hid-probe
+                             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(vds-macos-hid-probe PRIVATE "-framework CoreFoundation"
+                                                    "-framework IOKit")
+  add_custom_command(
+    TARGET vds-macos-hid-probe POST_BUILD
+    COMMAND codesign --force --sign -
+            --entitlements ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/vds.entitlements
+            $<TARGET_FILE:vds-macos-hid-probe>
+    VERBATIM)
+  return()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
