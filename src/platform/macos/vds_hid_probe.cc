@@ -6,6 +6,7 @@
 #include <IOKit/hid/IOHIDDeviceKeys.h>
 #include <IOKit/hid/IOHIDManager.h>
 #include <IOKit/hidsystem/IOHIDUserDevice.h>
+#include <dispatch/dispatch.h>
 #include <mach/mach_time.h>
 
 #include <array>
@@ -26,6 +27,10 @@ struct Bridge {
   std::array<std::uint8_t, VDS_BT_STATE_REPORT_SIZE> input_buffer{};
   vds::DsOutputState output_state;
   std::uint64_t input_reports = 0;
+  std::uint64_t output_reports = 0;
+  std::uint64_t feature_gets = 0;
+  std::uint64_t feature_sets = 0;
+  bool virtual_device_cancelled = false;
 };
 
 void stop(int) { running = 0; }
@@ -100,29 +105,86 @@ IOHIDUserDeviceRef create_virtual_dualsense(Bridge &bridge) {
   set_number(properties, CFSTR(kIOHIDVendorIDKey), VDS_SONY_VENDOR_ID);
   set_number(properties, CFSTR(kIOHIDProductIDKey), VDS_DS5_PRODUCT_ID);
   set_number(properties, CFSTR(kIOHIDVersionNumberKey), VDS_USB_DEVICE_BCD);
-  const auto device =
-      IOHIDUserDeviceCreateWithProperties(kCFAllocatorDefault, properties, 0);
+  const auto device = IOHIDUserDeviceCreateWithProperties(
+      kCFAllocatorDefault, properties, IOHIDUserDeviceOptionsCreateOnActivate);
   CFRelease(descriptor);
   CFRelease(properties);
   if (!device)
     return nullptr;
 
+  IOHIDUserDeviceRegisterGetReportBlock(
+      device, ^IOReturn(IOHIDReportType type, std::uint32_t report_id,
+                        std::uint8_t *report, CFIndex *report_length) {
+        if (type != kIOHIDReportTypeFeature || !report || !report_length ||
+            *report_length <= 0)
+          return kIOReturnUnsupported;
+
+        std::array<std::uint8_t, 256> physical_report{};
+        CFIndex physical_length = physical_report.size();
+        const auto result = IOHIDDeviceGetReport(
+            bridge.physical, kIOHIDReportTypeFeature, report_id,
+            physical_report.data(), &physical_length);
+        if (result != kIOReturnSuccess) {
+          std::cerr << "feature GET 0x" << std::hex << report_id << std::dec
+                    << " failed: 0x" << std::hex << result << std::dec << '\n';
+          return result;
+        }
+
+        std::vector<std::uint8_t> usb_report;
+        usb_report.reserve(static_cast<std::size_t>(physical_length) + 1);
+        if (physical_length == 0 || physical_report[0] != report_id)
+          usb_report.push_back(static_cast<std::uint8_t>(report_id));
+        usb_report.insert(usb_report.end(), physical_report.begin(),
+                          physical_report.begin() + physical_length);
+        if (usb_report.size() > static_cast<std::size_t>(*report_length))
+          usb_report.resize(static_cast<std::size_t>(*report_length));
+        std::copy(usb_report.begin(), usb_report.end(), report);
+        *report_length = static_cast<CFIndex>(usb_report.size());
+        ++bridge.feature_gets;
+        std::cout << "feature GET 0x" << std::hex << report_id << std::dec
+                  << " -> " << usb_report.size() << " bytes\n";
+        return kIOReturnSuccess;
+      });
+
   IOHIDUserDeviceRegisterSetReportBlock(
       device, ^IOReturn(IOHIDReportType type, std::uint32_t report_id,
                         const std::uint8_t *report, CFIndex report_length) {
-        if (type != kIOHIDReportTypeOutput || report_length <= 0)
+        if (report_length <= 0)
           return kIOReturnUnsupported;
         std::vector<std::uint8_t> usb_report(report, report + report_length);
         if (usb_report.front() != report_id)
           usb_report.insert(usb_report.begin(),
                             static_cast<std::uint8_t>(report_id));
+        if (type == kIOHIDReportTypeFeature) {
+          const auto packet = vds::feature_set_packet(usb_report);
+          if (packet.size() < 2)
+            return kIOReturnBadArgument;
+          const auto result = IOHIDDeviceSetReport(
+              bridge.physical, kIOHIDReportTypeFeature, report_id,
+              packet.data() + 1, packet.size() - 1);
+          if (result == kIOReturnSuccess)
+            ++bridge.feature_sets;
+          std::cout << "feature SET 0x" << std::hex << report_id << std::dec
+                    << " <- " << usb_report.size() << " bytes, result=0x"
+                    << std::hex << result << std::dec << '\n';
+          return result;
+        }
+        if (type != kIOHIDReportTypeOutput)
+          return kIOReturnUnsupported;
         if (!bridge.output_state.apply_usb_output_report(usb_report))
           return kIOReturnBadArgument;
         const auto bt_report = bridge.output_state.build_bt_state_report();
-        return IOHIDDeviceSetReport(bridge.physical, kIOHIDReportTypeOutput,
-                                    VDS_BT_STATE_REPORT_ID, bt_report.data(),
-                                    bt_report.size());
+        const auto result = IOHIDDeviceSetReport(
+            bridge.physical, kIOHIDReportTypeOutput, VDS_BT_STATE_REPORT_ID,
+            bt_report.data(), bt_report.size());
+        if (result == kIOReturnSuccess)
+          ++bridge.output_reports;
+        return result;
       });
+  IOHIDUserDeviceSetDispatchQueue(device, dispatch_get_main_queue());
+  IOHIDUserDeviceSetCancelHandler(
+      device, ^{ bridge.virtual_device_cancelled = true; });
+  IOHIDUserDeviceActivate(device);
   return device;
 }
 } // namespace
@@ -170,9 +232,15 @@ int main() {
   while (running)
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
 
-  std::cout << "forwarded " << bridge.input_reports << " input reports\n";
+  std::cout << "forwarded input=" << bridge.input_reports
+            << " output=" << bridge.output_reports
+            << " feature_get=" << bridge.feature_gets
+            << " feature_set=" << bridge.feature_sets << '\n';
   IOHIDDeviceUnscheduleFromRunLoop(bridge.physical, CFRunLoopGetCurrent(),
                                    kCFRunLoopDefaultMode);
+  IOHIDUserDeviceCancel(bridge.virtual_device);
+  while (!bridge.virtual_device_cancelled)
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
   CFRelease(bridge.virtual_device);
   IOHIDDeviceClose(bridge.physical, kIOHIDOptionsTypeNone);
   CFRelease(bridge.physical);
