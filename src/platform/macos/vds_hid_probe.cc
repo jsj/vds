@@ -25,6 +25,7 @@ struct Bridge {
   IOHIDDeviceRef physical = nullptr;
   IOHIDUserDeviceRef virtual_device = nullptr;
   std::array<std::uint8_t, VDS_BT_STATE_REPORT_SIZE> input_buffer{};
+  std::array<std::vector<std::uint8_t>, 256> feature_cache;
   vds::DsOutputState output_state;
   std::uint64_t input_reports = 0;
   std::uint64_t output_reports = 0;
@@ -119,8 +120,19 @@ IOHIDUserDeviceRef create_virtual_dualsense(Bridge &bridge) {
             *report_length <= 0)
           return kIOReturnUnsupported;
 
+        auto &cached = bridge.feature_cache[report_id & 0xff];
+        if (!cached.empty()) {
+          const auto size = std::min(cached.size(),
+                                     static_cast<std::size_t>(*report_length));
+          std::copy_n(cached.begin(), size, report);
+          *report_length = static_cast<CFIndex>(size);
+          ++bridge.feature_gets;
+          return kIOReturnSuccess;
+        }
+
         std::array<std::uint8_t, 256> physical_report{};
-        CFIndex physical_length = physical_report.size();
+        CFIndex physical_length = std::min(
+            static_cast<CFIndex>(physical_report.size()), *report_length);
         const auto result = IOHIDDeviceGetReport(
             bridge.physical, kIOHIDReportTypeFeature, report_id,
             physical_report.data(), &physical_length);
@@ -140,6 +152,7 @@ IOHIDUserDeviceRef create_virtual_dualsense(Bridge &bridge) {
           usb_report.resize(static_cast<std::size_t>(*report_length));
         std::copy(usb_report.begin(), usb_report.end(), report);
         *report_length = static_cast<CFIndex>(usb_report.size());
+        cached = usb_report;
         ++bridge.feature_gets;
         std::cout << "feature GET 0x" << std::hex << report_id << std::dec
                   << " -> " << usb_report.size() << " bytes\n";
