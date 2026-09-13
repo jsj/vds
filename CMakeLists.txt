@@ -29,21 +29,6 @@ else()
   set(VDS_OPUS_TARGET PkgConfig::OPUS)
 endif()
 
-if(APPLE)
-  add_executable(vds-macos-hid-probe src/platform/macos/vds_hid_probe.cc)
-  target_include_directories(vds-macos-hid-probe
-                             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(vds-macos-hid-probe PRIVATE "-framework CoreFoundation"
-                                                    "-framework IOKit")
-  add_custom_command(
-    TARGET vds-macos-hid-probe POST_BUILD
-    COMMAND codesign --force --sign -
-            --entitlements ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/vds.entitlements
-            $<TARGET_FILE:vds-macos-hid-probe>
-    VERBATIM)
-  return()
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -68,6 +53,25 @@ target_include_directories(
   vds_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                       ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_protocol PRIVATE ${VDS_OPUS_TARGET})
+
+if(APPLE)
+  add_executable(vds-macos-hid-probe src/platform/macos/vds_hid_probe.cc)
+  target_include_directories(vds-macos-hid-probe
+                             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                     ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_options(vds-macos-hid-probe PRIVATE -fblocks)
+  target_link_libraries(vds-macos-hid-probe PRIVATE vds_protocol
+                                                    ${VDS_OPUS_TARGET}
+                                                    "-framework CoreFoundation"
+                                                    "-framework IOKit")
+  add_custom_command(
+    TARGET vds-macos-hid-probe POST_BUILD
+    COMMAND codesign --force --sign -
+            --entitlements ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/vds.entitlements
+            $<TARGET_FILE:vds-macos-hid-probe>
+    VERBATIM)
+  return()
+endif()
 
 add_library(vds_common OBJECT src/vds_common.cc)
 target_include_directories(vds_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

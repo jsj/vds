@@ -15,7 +15,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <opus/opus.h>
+#include <opus.h>
 
 #include "uapi/vds.h"
 #include "vds_protocol.hh"

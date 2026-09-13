@@ -3,7 +3,7 @@
 #ifndef _UAPI_VDS_H
 #define _UAPI_VDS_H
 
-#ifdef _WIN32
+#if defined(_WIN32) || !defined(__linux__)
 #include <stdint.h>
 typedef uint8_t __u8;
 typedef uint16_t __u16;
@@ -91,7 +91,7 @@ struct vds_profile_config {
 	__u32 polling_rate_mode;
 };
 
-#ifndef _WIN32
+#ifdef __linux__
 #define VDS_IOC_GET_STATUS _IOR(VDS_IOC_MAGIC, 0x01, struct vds_status)
 #define VDS_IOC_SET_PROFILE _IOW(VDS_IOC_MAGIC, 0x02, struct vds_profile_config)
 #define VDS_IOC_CONNECT _IO(VDS_IOC_MAGIC, 0x03)

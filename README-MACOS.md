@@ -1,7 +1,9 @@
 # macOS
 
-The macOS backend is experimental. Its first milestone is a virtual USB-style
-DualSense HID device built from vDS's existing Sony report descriptor.
+The macOS backend is experimental. It bridges a connected Bluetooth DualSense
+to a virtual USB-style DualSense HID device built from vDS's existing Sony
+report descriptor. Input reports and HID output state, including adaptive
+trigger commands, are translated through vDS's shared protocol code.
 
 ```sh
 brew install cmake pkgconf opus
@@ -9,6 +11,10 @@ cmake -S . -B build-macos
 cmake --build build-macos --target vds-macos-hid-probe
 ./build-macos/vds-macos-hid-probe
 ```
+
+Pair the controller in macOS before starting the bridge. Keep the bridge
+running while starting the game, and disable Steam Input so the game opens the
+native DualSense device.
 
 Apple requires the restricted `com.apple.developer.hid.virtual.device`
 entitlement to create the virtual HID device. The build signs the probe ad hoc
@@ -18,3 +24,6 @@ permits it.
 On macOS 26.5 with Xcode 27, the ad-hoc signed probe registers as
 `054C:0CE6`, matches Apple's PS5 game-controller personality, and is enumerated
 by CrossOver 27 as `HID\\VID_054C&PID_0CE6`.
+
+The four-channel audio endpoint required for native advanced haptics is not
+implemented yet.
