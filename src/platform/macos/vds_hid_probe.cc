@@ -216,7 +216,7 @@ int main() {
 
   bridge.physical = find_bluetooth_dualsense(manager);
   if (!bridge.physical ||
-      IOHIDDeviceOpen(bridge.physical, kIOHIDOptionsTypeNone) !=
+      IOHIDDeviceOpen(bridge.physical, kIOHIDOptionsTypeSeizeDevice) !=
           kIOReturnSuccess) {
     std::cerr << "unable to open Bluetooth DualSense 054C:0CE6\n";
     if (bridge.physical)
@@ -227,7 +227,7 @@ int main() {
   bridge.virtual_device = create_virtual_dualsense(bridge);
   if (!bridge.virtual_device) {
     std::cerr << "failed to create virtual DualSense\n";
-    IOHIDDeviceClose(bridge.physical, kIOHIDOptionsTypeNone);
+    IOHIDDeviceClose(bridge.physical, kIOHIDOptionsTypeSeizeDevice);
     CFRelease(bridge.physical);
     CFRelease(manager);
     return 1;
@@ -255,7 +255,7 @@ int main() {
   while (!bridge.virtual_device_cancelled)
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
   CFRelease(bridge.virtual_device);
-  IOHIDDeviceClose(bridge.physical, kIOHIDOptionsTypeNone);
+  IOHIDDeviceClose(bridge.physical, kIOHIDOptionsTypeSeizeDevice);
   CFRelease(bridge.physical);
   IOHIDManagerClose(manager, kIOHIDOptionsTypeNone);
   CFRelease(manager);
